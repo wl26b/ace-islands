@@ -1,4 +1,5 @@
-import { IMPACT_POS, SWEEP_MS } from './constants'
+import { IMPACT_TOLERANCE, SWEEP_MS } from './constants'
+import { pureTaps } from './bar'
 
 export { pureTaps } from './bar'
 
@@ -9,9 +10,11 @@ export { pureTaps } from './bar'
 export function taps(
   power: number,
   error: number,
+  cap = 1,
 ): { powerTapMs: number; impactTapMs: number } {
+  const pure = pureTaps(power, cap)
   return {
-    powerTapMs: power * SWEEP_MS,
-    impactTapMs: (power - IMPACT_POS) * SWEEP_MS - error * 0.12 * SWEEP_MS,
+    powerTapMs: pure.powerTapMs,
+    impactTapMs: pure.impactTapMs - error * IMPACT_TOLERANCE * SWEEP_MS,
   }
 }

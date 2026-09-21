@@ -22,12 +22,26 @@ export interface LoggedShot {
   impactTapMs: number
 }
 
-/** Everything needed to recompute a run's score from scratch. */
+/**
+ * Everything needed to recompute a run's score from scratch.
+ *
+ * The version is the shape *and the meaning* of the timings. Version 2
+ * moved to a two-section bar, version 3 changed how putting power maps to
+ * distance, and version 4 dropped the impact test from putting -- in each
+ * case the same milliseconds describe a different shot. Version 5 gave
+ * the putter scales, and version 6 made the game choose them, so the same
+ * milliseconds again mean something else. An older log cannot simply be replayed under the current rules --
+ * it has to be rejected rather than silently rescored into something that
+ * never happened.
+ */
 export interface RunLog {
-  version: 1
+  version: 7
   seed: number
   shots: LoggedShot[]
 }
+
+/** The log format this build writes and can replay. */
+export const LOG_VERSION = 7
 
 export interface HoleOutcome {
   hole: number
@@ -35,6 +49,8 @@ export interface HoleOutcome {
   strokes: number
   holed: boolean
   birdie: boolean
+  /** Straight in from the tee. The moment the game is named for. */
+  ace: boolean
   /** False when this hole ended the run. */
   survived: boolean
 }
@@ -55,16 +71,23 @@ export interface RunState {
 export interface RunScore {
   holesSurvived: number
   birdies: number
+  aces: number
   holes: HoleOutcome[]
   /** True once the run has actually ended rather than merely run out of log. */
   finished: boolean
 }
 
-export function startRun(seed: number): RunState {
-  const hole = generateHole(seed, 1)
+/**
+ * Begins a run. `firstHole` exists so a later, harder hole can be looked
+ * at directly; a run started past hole 1 is practice and is not offered to
+ * the leaderboard, so the log never has to carry it.
+ */
+export function startRun(seed: number, firstHole = 1): RunState {
+  const holeNumber = Math.max(1, Math.floor(firstHole))
+  const hole = generateHole(seed, holeNumber)
   return {
     seed,
-    holeNumber: 1,
+    holeNumber,
     hole,
     ball: { ...hole.tee },
     strokes: 0,
@@ -138,6 +161,7 @@ export function applyShot(
     strokes: state.strokes,
     holed,
     birdie: holed && state.strokes < par,
+    ace: holed && state.strokes === 1,
     survived,
   }
   state.holes.push(outcome)
@@ -163,6 +187,7 @@ export function summarise(state: RunState): RunScore {
   return {
     holesSurvived: state.holes.filter((h) => h.survived).length,
     birdies: state.holes.filter((h) => h.birdie).length,
+    aces: state.holes.filter((h) => h.ace).length,
     holes: state.holes,
     finished: state.status === 'run-over',
   }

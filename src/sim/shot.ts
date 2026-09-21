@@ -1,7 +1,8 @@
-import type { Hole, Vec3 } from './types'
+import type { Hole, Island, Vec3 } from './types'
 import * as K from './constants'
-import { accuracyFromTaps, clamp, isPure, powerFromTap } from './bar'
+import { accuracyFromTaps, clamp, isPure, powerCapFor, powerFromTap } from './bar'
 import { aimDirection } from './aim'
+import { gradientAt, heightAt } from './surface'
 
 /**
  * The pure shot module.
@@ -58,15 +59,28 @@ function horizontalDist(ax: number, az: number, bx: number, bz: number): number 
   return Math.hypot(ax - bx, az - bz)
 }
 
-/** What lies under a given point: the green, the tee island, or water. */
+/** Which island a point sits over, if any. */
+function islandAt(hole: Hole, x: number, z: number): Island | null {
+  const g = hole.greenIsland
+  if (horizontalDist(x, z, g.centre.x, g.centre.z) <= g.radius) return g
+  const t = hole.teeIsland
+  if (horizontalDist(x, z, t.centre.x, t.centre.z) <= t.radius) return t
+  return null
+}
+
+/**
+ * What lies under a given point: the green, the tee island, or water, and
+ * at what height. Ground is no longer level, so the height comes from the
+ * same field the renderer builds its mesh from.
+ */
 export function surfaceAt(hole: Hole, x: number, z: number): Surface {
   const g = hole.greenIsland
   if (horizontalDist(x, z, g.centre.x, g.centre.z) <= g.radius) {
-    return { kind: 'green', y: g.surfaceY }
+    return { kind: 'green', y: heightAt(g, x, z) }
   }
   const t = hole.teeIsland
   if (horizontalDist(x, z, t.centre.x, t.centre.z) <= t.radius) {
-    return { kind: 'tee', y: t.surfaceY }
+    return { kind: 'tee', y: heightAt(t, x, z) }
   }
   return { kind: 'water', y: 0 }
 }
@@ -92,8 +106,19 @@ function distanceToCup(
  * The cup's capture radius shrinks as the ball speeds up and reaches zero at
  * CAPTURE_SPEED, which is what makes a putt struck too hard lip out.
  */
-function capturedBy(hole: Hole, speed: number, dist: number): boolean {
-  const effective = hole.cupRadius * clamp(1 - speed / K.CAPTURE_SPEED, 0, 1)
+/** How much further a ball at this speed would run before stopping. */
+function runOut(speed: number, friction: number): number {
+  return (speed * speed) / (2 * friction)
+}
+
+function capturedBy(
+  hole: Hole,
+  speed: number,
+  dist: number,
+  friction: number,
+): boolean {
+  const left = runOut(speed, friction)
+  const effective = hole.cupRadius * clamp(1 - left / K.CAPTURE_RUNOUT, 0, 1)
   // Guard the zero case explicitly: a ball rolling dead over the cup centre
   // has dist === 0, and `0 <= 0` would drop it in at any speed at all.
   if (effective <= 0) return false
@@ -101,9 +126,23 @@ function capturedBy(hole: Hole, speed: number, dist: number): boolean {
 }
 
 export function simulateShot(hole: Hole, input: ShotInput): ShotResult {
-  const power = powerFromTap(input.powerTapMs)
-  const accuracy = accuracyFromTaps(power, input.impactTapMs)
-  const pure = isPure(power, input.impactTapMs)
+  // The putter's scale follows the length of the putt, so it is derived
+  // here rather than carried in: one fewer number for a run log to get
+  // wrong, or to lie about.
+  const power = powerFromTap(
+    input.powerTapMs,
+    powerCapFor(
+      input.kind,
+      horizontalDist(input.from.x, input.from.z, hole.pin.x, hole.pin.z),
+    ),
+  )
+  // A putt is struck true. There is no impact test on the green: the
+  // difficulty of a putt is reading the slope and judging the pace, not
+  // catching a marker. The rule lives here rather than in the UI so a log
+  // cannot describe a mishit putt the game would never let you play.
+  const putting = input.kind === 'putt'
+  const accuracy = putting ? 0 : accuracyFromTaps(power, input.impactTapMs)
+  const pure = putting ? false : isPure(power, input.impactTapMs)
   const missAmount = Math.min(Math.abs(accuracy), 1)
 
   const pos: Vec3 = { x: input.from.x, y: input.from.y, z: input.from.z }
@@ -123,9 +162,20 @@ export function simulateShot(hole: Hole, input: ShotInput): ShotResult {
     vel.z = dir.z * flat
     rolling = false
   } else {
-    const aim = input.aim + K.PUTT_SKEW * accuracy
+    const aim = input.aim
+    // Interpolated on the square of the speed, not the speed itself. A
+    // rolling ball covers v^2 / 2a, so a linear speed ramp would make
+    // distance grow as the square of the bar: half a bar would send it a
+    // third of the way, and the distance readout would be a lie on every
+    // putt. This way the fill means the same thing as it does off the tee.
     const speed =
-      lerp(K.PUTT_MIN_SPEED, K.PUTT_MAX_SPEED, power) *
+      Math.sqrt(
+        lerp(
+          K.PUTT_MIN_SPEED * K.PUTT_MIN_SPEED,
+          K.PUTT_MAX_SPEED * K.PUTT_MAX_SPEED,
+          power,
+        ),
+      ) *
       (1 - K.MISHIT_SPEED_LOSS * missAmount * 0.5)
     const dir = aimDirection(aim)
     vel.x = dir.x * speed
@@ -224,13 +274,25 @@ export function simulateShot(hole: Hole, input: ShotInput): ShotResult {
         }
       }
     } else {
+      // Gravity down the slope, before friction gets a say. This is what
+      // makes a putt break: the ball is pulled across its line all the way
+      // to the hole, not merely aimed off at the start.
+      const ground = islandAt(hole, pos.x, pos.z)
+      if (ground) {
+        const tilt = gradientAt(ground, pos.x, pos.z)
+        vel.x -= K.GRAVITY * tilt.x * K.DT
+        vel.z -= K.GRAVITY * tilt.z * K.DT
+      }
+
       const speed = Math.hypot(vel.x, vel.z)
       if (speed < K.REST_SPEED) {
         surface = surfaceAt(hole, pos.x, pos.z).kind
         outcome = 'rest'
         break
       }
-      const slowed = Math.max(0, speed - K.ROLL_FRICTION * K.DT)
+      const friction =
+        input.kind === 'putt' ? K.PUTT_FRICTION : K.ROLL_FRICTION
+      const slowed = Math.max(0, speed - friction * K.DT)
       vel.x = (vel.x / speed) * slowed
       vel.z = (vel.z / speed) * slowed
       pos.x += vel.x * K.DT
@@ -248,7 +310,7 @@ export function simulateShot(hole: Hole, input: ShotInput): ShotResult {
 
       if (under.kind === 'green') {
         const dist = distanceToCup(hole, prevX, prevZ, pos.x, pos.z)
-        if (capturedBy(hole, slowed, dist)) {
+        if (capturedBy(hole, slowed, dist, friction)) {
           pos.x = hole.pin.x
           pos.z = hole.pin.z
           outcome = 'holed'
@@ -280,7 +342,10 @@ export function simulateShot(hole: Hole, input: ShotInput): ShotResult {
             // through, a rim graze barely touches.
             // The quicker it crosses, the less time it spends in the hole
             // to be turned or slowed. A rocket barely feels the lip.
-            const influence = Math.min(K.CAPTURE_SPEED / slowed, 1)
+            const influence = Math.min(
+              K.CAPTURE_RUNOUT / Math.max(runOut(slowed, friction), 1e-6),
+              1,
+            )
             const bend =
               K.LIP_TURN * (side >= 0 ? 1 : -1) * 4 * r * (1 - r) * influence
             const keep = 1 - K.LIP_DRAG * (1 - r) * influence

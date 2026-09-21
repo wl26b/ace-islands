@@ -22,12 +22,36 @@ export interface Vec2 {
   z: number
 }
 
+/**
+ * How a surface departs from level: a steady tilt plus one broad swell.
+ * Small numbers -- a gradient of 0.06 is a 6% slope, about 3.5 degrees.
+ */
+export interface Slope {
+  /** Rise per metre along X and Z. */
+  gradientX: number
+  gradientZ: number
+  /** A single rolling swell laid over the tilt, in metres. */
+  swellAmp: number
+  swellFreq: number
+  swellPhase: number
+}
+
 /** A floating disc of land. */
 export interface Island {
   centre: Vec2
   radius: number
-  /** Height of the walkable surface above the water. */
+  /** Height of the walkable surface at the island's centre. */
   surfaceY: number
+  slope: Slope
+}
+
+/** A level surface, for tee boxes and for measuring reference shots. */
+export const FLAT: Slope = {
+  gradientX: 0,
+  gradientZ: 0,
+  swellAmp: 0,
+  swellFreq: 0,
+  swellPhase: 0,
 }
 
 export interface Wind {

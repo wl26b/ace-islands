@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest'
 import { HOLE_ONE, generateHole } from './holes'
 import { simulateShot, surfaceAt } from './shot'
+import { powerCapFor } from './bar'
 import { aimDirection, aimTowards } from './aim'
 import { maxRange } from './range'
 import { pureTaps, taps } from './testing'
@@ -11,6 +12,12 @@ const tee = HOLE_ONE.tee
 
 function drive(hole: Hole, power: number, error = 0, aim = 0) {
   return simulateShot(hole, { kind: 'drive', from: tee, aim, ...taps(power, error) })
+}
+
+/** The bar fill the game tells a player to use for this hole. */
+function pinFraction(hole: Hole): number {
+  const dist = Math.hypot(hole.pin.x - tee.x, hole.pin.z - tee.z)
+  return dist / maxRange(hole, 'drive')
 }
 
 describe('determinism', () => {
@@ -39,7 +46,10 @@ describe('the carry', () => {
   })
 
   test('a well struck shot finds the green', () => {
-    const r = drive(calm, 0.86)
+    // Played at the power the HUD recommends -- the share of full power
+    // that the pin distance represents -- rather than a number baked in
+    // here, which would rot the moment the roll or the flight is retuned.
+    const r = drive(calm, pinFraction(calm))
     expect(r.outcome).toBe('rest')
     expect(r.surface).toBe('green')
     expect(r.toPin).toBeLessThan(6)
@@ -52,10 +62,8 @@ describe('the carry', () => {
     expect(r.outcome).toBe('water')
   })
 
-  test('too much power runs the ball to the back of the green', () => {
-    const long = drive(calm, 1)
-    const good = drive(calm, 0.86)
-    expect(long.toPin).toBeGreaterThan(good.toPin)
+  test('too much power runs the ball past the pin', () => {
+    expect(drive(calm, 1).toPin).toBeGreaterThan(drive(calm, pinFraction(calm)).toPin)
   })
 })
 
@@ -122,8 +130,29 @@ describe('the cup', () => {
     expect(r.outcome).not.toBe('holed')
   })
 
-  test('a putt pushed offline misses', () => {
-    expect(putt(0.55, 1).outcome).not.toBe('holed')
+  test('a putt aimed offline misses', () => {
+    // Offline now means aimed off, not struck badly: there is no impact
+    // test on the green.
+    const offline = simulateShot(calm, {
+      kind: 'putt',
+      from,
+      aim: 0.12,
+      ...taps(0.55, 0),
+    })
+    expect(offline.outcome).not.toBe('holed')
+  })
+
+  test('the impact timing is ignored on the green', () => {
+    // The contract putting now rests on. If a tap could still nudge a
+    // putt, the run log would carry a degree of freedom the player never
+    // had, and a replay could produce a putt nobody struck.
+    const straight = putt(0.55, 0)
+    for (const error of [-1.5, -0.4, 0.4, 1.5]) {
+      const nudged = putt(0.55, error)
+      expect(nudged.end, `error ${error}`).toEqual(straight.end)
+      expect(nudged.accuracy, `error ${error}`).toBe(0)
+      expect(nudged.pure, `error ${error}`).toBe(false)
+    }
   })
 
   test('a putt left short stays short', () => {
@@ -140,37 +169,50 @@ describe('the lip', () => {
     y: HOLE_ONE.greenIsland.surfaceY,
     z: HOLE_ONE.pin.z + dist,
   }
-  /** The same hole with the cup moved out of reach, as a control. */
-  const noCup: Hole = { ...calm, pin: { x: 0, z: -1e6 } }
+  /**
+   * A control with the cup out of the way. The pin is moved *behind* the
+   * ball rather than to infinity, because the putter's scale is chosen
+   * from the distance to the pin -- parking it a kilometre away would
+   * hand the control a different ruler and compare two unlike shots.
+   */
+  const noCup: Hole = { ...calm, pin: { x: from.x, z: from.z + dist } }
 
-  const roll = (hole: Hole, power: number, offset: number) =>
+  // The putter's scale follows the length of the putt, so powers here are
+  // fractions of *that* ruler. A putt can no longer be struck harder than
+  // its scale reaches, which is the point of the scale.
+  const cap = powerCapFor('putt', dist)
+  const roll = (hole: Hole, fractionOfScale: number, offset: number) =>
     simulateShot(hole, {
       kind: 'putt',
       from,
       aim: Math.atan2(offset, dist),
-      ...taps(power, 0),
+      ...taps(fractionOfScale * cap, 0, cap),
     })
 
   test('a ball crossing the cup too fast is thrown off its line', () => {
-    const lipped = roll(calm, 0.7, 0.3)
-    const control = roll(noCup, 0.7, 0.3)
+    // Offset scaled to the cup: a fixed distance would sit mid-hole on a
+    // wide cup and out on the rim of a narrow one, where the lip barely
+    // touches it by design.
+    const offset = calm.cupRadius * 0.5
+    const lipped = roll(calm, 1, offset)
+    const control = roll(noCup, 1, offset)
     expect(lipped.outcome).not.toBe('holed')
     // It must not sail over as though the cup were painted on.
-    expect(Math.abs(lipped.end.x - control.end.x)).toBeGreaterThan(0.4)
+    expect(Math.abs(lipped.end.x - control.end.x)).toBeGreaterThan(0.2)
   })
 
   test('the lip pulls the ball towards the hole', () => {
     // It drops into the near edge and curls, rather than being batted away:
     // a ball passing to the right of the cup is turned back leftwards.
-    const passedRight = roll(calm, 0.7, 0.3).end.x - roll(noCup, 0.7, 0.3).end.x
-    const passedLeft = roll(calm, 0.7, -0.3).end.x - roll(noCup, 0.7, -0.3).end.x
+    const passedRight = roll(calm, 1, 0.3).end.x - roll(noCup, 1, 0.3).end.x
+    const passedLeft = roll(calm, 1, -0.3).end.x - roll(noCup, 1, -0.3).end.x
     expect(passedRight).toBeLessThan(0)
     expect(passedLeft).toBeGreaterThan(0)
   })
 
   test('a dead centre pass is slowed but not turned', () => {
-    const lipped = roll(calm, 0.7, 0)
-    const control = roll(noCup, 0.7, 0)
+    const lipped = roll(calm, 1, 0)
+    const control = roll(noCup, 1, 0)
     expect(Math.abs(lipped.end.x - control.end.x)).toBeLessThan(0.01)
     const travelled = Math.hypot(lipped.end.x - from.x, lipped.end.z - from.z)
     const clean = Math.hypot(control.end.x - from.x, control.end.z - from.z)
@@ -184,9 +226,9 @@ describe('the lip', () => {
     // Measured as an angle. Comparing sideways displacement at rest would
     // be meaningless: a faster ball rolls much further after the cup, so a
     // smaller turn still ends up further off line.
-    const turnAngle = (power: number): number => {
-      const lipped = roll(calm, power, 0.2)
-      const control = roll(noCup, power, 0.2)
+    const turnAngle = (fractionOfScale: number): number => {
+      const lipped = roll(calm, fractionOfScale, 0.2)
+      const control = roll(noCup, fractionOfScale, 0.2)
       const sideways = Math.abs(lipped.end.x - control.end.x)
       const afterCup = Math.hypot(
         lipped.end.x - calm.pin.x,
@@ -194,12 +236,12 @@ describe('the lip', () => {
       )
       return sideways / Math.max(afterCup, 0.01)
     }
-    expect(turnAngle(1)).toBeLessThan(turnAngle(0.55))
+    expect(turnAngle(1)).toBeLessThan(turnAngle(0.82))
   })
 
   test('a putt that misses the cup entirely is untouched', () => {
-    const wide = roll(calm, 0.7, 1.5)
-    const control = roll(noCup, 0.7, 1.5)
+    const wide = roll(calm, 1, 1.5)
+    const control = roll(noCup, 1, 1.5)
     expect(wide.end.x).toBeCloseTo(control.end.x, 9)
     expect(wide.end.z).toBeCloseTo(control.end.z, 9)
   })
@@ -215,8 +257,8 @@ describe('the lip', () => {
   })
 
   test('a lipped putt is still perfectly deterministic', () => {
-    const a = roll(calm, 0.7, 0.3)
-    const b = roll(calm, 0.7, 0.3)
+    const a = roll(calm, 1, 0.3)
+    const b = roll(calm, 1, 0.3)
     expect(b.end).toEqual(a.end)
     expect(b.path).toEqual(a.path)
   })

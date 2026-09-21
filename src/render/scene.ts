@@ -1,6 +1,9 @@
 import * as THREE from 'three'
-import type { Hole, Island } from '../sim/types'
+import type { Hole } from '../sim/types'
 import { BALL_RADIUS, PALETTE } from './palette'
+import { buildIsland, buildSeascape, buildSky } from './terrain'
+import { heightAt } from '../sim/surface'
+import type { Seascape, Sky } from './terrain'
 
 /**
  * Builds the visible world from a Hole. Read-only with respect to the
@@ -11,83 +14,70 @@ function flat(colour: number): THREE.MeshLambertMaterial {
   return new THREE.MeshLambertMaterial({ color: colour, flatShading: true })
 }
 
-/**
- * An island is a chunky low-poly cylinder: grass cap, rock body, and a low
- * segment count so the facets read as deliberate.
- */
-function buildIsland(island: Island, grassColour: number): THREE.Group {
-  const group = new THREE.Group()
-  const depth = 7
-  const segments = 9
-
-  // The body stops 1m short of the surface so its top face ends up hidden
-  // inside the grass cap. Ending it flush at surfaceY would make the two top
-  // faces coplanar, and they z-fight into a speckled mess.
-  const body = new THREE.Mesh(
-    new THREE.CylinderGeometry(island.radius * 0.72, island.radius, depth, segments, 1),
-    flat(PALETTE.rock),
-  )
-  body.position.y = island.surfaceY - 1 - depth / 2
-  group.add(body)
-
-  const cap = new THREE.Mesh(
-    new THREE.CylinderGeometry(island.radius, island.radius, 1.2, segments, 1),
-    flat(grassColour),
-  )
-  cap.position.y = island.surfaceY - 0.6
-  cap.receiveShadow = true
-  group.add(cap)
-
-  group.position.set(island.centre.x, 0, island.centre.z)
-  return group
-}
-
-function buildWater(): THREE.Mesh {
-  const water = new THREE.Mesh(
-    new THREE.PlaneGeometry(600, 600, 24, 24),
-    new THREE.MeshLambertMaterial({
-      color: PALETTE.water,
-      flatShading: true,
-      transparent: true,
-      opacity: 0.92,
-    }),
-  )
-  water.rotation.x = -Math.PI / 2
-  water.position.y = 0
-  return water
-}
-
 function buildFlag(hole: Hole): THREE.Group {
   const group = new THREE.Group()
   const poleHeight = 2.6
 
   const pole = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.06, 0.06, poleHeight, 6),
+    new THREE.CylinderGeometry(0.05, 0.06, poleHeight, 6),
     flat(PALETTE.flagPole),
   )
   pole.position.y = poleHeight / 2
   group.add(pole)
 
-  const cloth = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 0.7), new THREE.MeshLambertMaterial({
-    color: PALETTE.flagCloth,
-    flatShading: true,
-    side: THREE.DoubleSide,
-  }))
+  const cloth = new THREE.Mesh(
+    new THREE.PlaneGeometry(1.1, 0.7),
+    new THREE.MeshLambertMaterial({
+      color: PALETTE.flagCloth,
+      flatShading: true,
+      side: THREE.DoubleSide,
+    }),
+  )
   cloth.position.set(0.55, poleHeight - 0.45, 0)
   group.add(cloth)
 
-  group.position.set(hole.pin.x, hole.greenIsland.surfaceY, hole.pin.z)
+  // On contoured ground the pin sits at its own local height.
+  group.position.set(
+    hole.pin.x,
+    heightAt(hole.greenIsland, hole.pin.x, hole.pin.z),
+    hole.pin.z,
+  )
   return group
 }
 
-function buildCup(hole: Hole): THREE.Mesh {
-  const cup = new THREE.Mesh(
-    new THREE.CircleGeometry(hole.cupRadius, 12),
-    new THREE.MeshBasicMaterial({ color: 0x1d2b1b }),
+/** The hole itself, with a pale collar so it reads from the tee. */
+function buildCup(hole: Hole): THREE.Group {
+  const group = new THREE.Group()
+
+  const collar = new THREE.Mesh(
+    new THREE.RingGeometry(hole.cupRadius, hole.cupRadius + 0.22, 16),
+    new THREE.MeshBasicMaterial({ color: PALETTE.puttingGreen, depthWrite: false }),
   )
-  cup.rotation.x = -Math.PI / 2
-  cup.position.set(hole.pin.x, hole.greenIsland.surfaceY + 0.02, hole.pin.z)
-  return cup
+  collar.rotation.x = -Math.PI / 2
+  collar.position.y = 0.02
+  group.add(collar)
+
+  const hollow = new THREE.Mesh(
+    new THREE.CylinderGeometry(hole.cupRadius, hole.cupRadius * 0.9, 0.45, 16, 1, true),
+    new THREE.MeshBasicMaterial({ color: PALETTE.cup, side: THREE.BackSide }),
+  )
+  hollow.position.y = -0.22
+  group.add(hollow)
+
+  const floor = new THREE.Mesh(
+    new THREE.CircleGeometry(hole.cupRadius * 0.9, 16),
+    new THREE.MeshBasicMaterial({ color: PALETTE.cup }),
+  )
+  floor.rotation.x = -Math.PI / 2
+  floor.position.y = -0.44
+  group.add(floor)
+
+  group.position.set(
+    hole.pin.x,
+    heightAt(hole.greenIsland, hole.pin.x, hole.pin.z) + 0.01,
+    hole.pin.z,
+  )
+  return group
 }
 
 function buildBall(hole: Hole): THREE.Mesh {
@@ -133,23 +123,42 @@ export interface World {
   ball: THREE.Mesh
   aimLine: THREE.Group
   flag: THREE.Group
+  seascape: Seascape
+  sky: Sky
 }
 
 export function buildWorld(hole: Hole): World {
   const scene = new THREE.Scene()
   scene.background = new THREE.Color(PALETTE.sky)
-  // Fog matches the sky exactly, so the far water dissolves into the horizon
-  // instead of ending on a visible band.
-  scene.fog = new THREE.Fog(PALETTE.sky, 130, 420)
+  // Fog matches the sky exactly, and closes well before the water plane
+  // runs out (it reaches 350m), so the sea dissolves into the horizon
+  // rather than stopping on a visible edge.
+  scene.fog = new THREE.Fog(PALETTE.sky, 95, 320)
 
-  scene.add(new THREE.HemisphereLight(0xffffff, PALETTE.waterDeep, 1.05))
-  const sun = new THREE.DirectionalLight(0xfff4e0, 1.25)
+  scene.add(new THREE.HemisphereLight(0xffffff, PALETTE.waterDeep, 0.95))
+  const sun = new THREE.DirectionalLight(0xfff4e0, 1.15)
   sun.position.set(-30, 60, 20)
   scene.add(sun)
+  // A second, dimmer light from the other side keeps the cliff faces from
+  // going flat black where the sun does not reach.
+  const fill = new THREE.DirectionalLight(0xdbeef7, 0.3)
+  fill.position.set(40, 25, -40)
+  scene.add(fill)
 
-  scene.add(buildWater())
-  scene.add(buildIsland(hole.teeIsland, PALETTE.grass))
-  scene.add(buildIsland(hole.greenIsland, PALETTE.green))
+  const seascape = buildSeascape(hole)
+  scene.add(seascape.group)
+  const sky = buildSky()
+  scene.add(sky.group)
+
+  // The tee island is mown around the teeing ground; the green around the pin.
+  scene.add(buildIsland(hole.teeIsland, { x: hole.tee.x, z: hole.tee.z }, 3.4))
+  scene.add(
+    buildIsland(
+      hole.greenIsland,
+      hole.pin,
+      Math.min(hole.greenIsland.radius * 0.45, 11),
+    ),
+  )
 
   const flag = buildFlag(hole)
   scene.add(flag)
@@ -162,5 +171,5 @@ export function buildWorld(hole: Hole): World {
   aimLine.position.set(hole.tee.x, hole.tee.y + 0.05, hole.tee.z)
   scene.add(aimLine)
 
-  return { scene, ball, aimLine, flag }
+  return { scene, ball, aimLine, flag, seascape, sky }
 }

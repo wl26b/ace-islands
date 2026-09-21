@@ -1,5 +1,5 @@
 import type { RunLog } from '../sim/run'
-import { scoreRun } from '../sim/run'
+import { LOG_VERSION, scoreRun } from '../sim/run'
 
 /**
  * The fake local leaderboard.
@@ -26,6 +26,7 @@ export interface Entry {
   at: number
   holesSurvived: number
   birdies: number
+  aces: number
 }
 
 function readAll(): StoredRun[] {
@@ -51,6 +52,9 @@ function isStoredRun(v: unknown): v is StoredRun {
     typeof r.at === 'number' &&
     typeof r.log === 'object' &&
     r.log !== null &&
+    // Logs from an older bar would replay into a different score, so they
+    // are dropped rather than shown as something they are not.
+    r.log.version === LOG_VERSION &&
     typeof r.log.seed === 'number' &&
     Array.isArray(r.log.shots)
   )
@@ -97,6 +101,7 @@ export function leaderboard(limit = 8): Entry[] {
         at: run.at,
         holesSurvived: score.holesSurvived,
         birdies: score.birdies,
+        aces: score.aces,
       }
     })
     .sort(

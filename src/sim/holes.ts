@@ -1,9 +1,14 @@
-import type { Hole } from './types'
+import type { Hole, Slope } from './types'
+import { FLAT } from './types'
+import { MAX_GREEN_GRADIENT } from './constants'
 import { range, streamFor } from './rng'
 import { maxRange } from './range'
 
 /**
  * The reference hole, and the generator that makes the ones you play.
+ *
+ * Par 3: one shot to the green and two putts, which is what a one-shot
+ * hole is in real golf. There is no such thing as a par 2.
  *
  * A hole is plain data, so nothing here touches the renderer: the scene is
  * built from whatever these return.
@@ -13,24 +18,29 @@ import { maxRange } from './range'
  * inside this envelope. Kept as the fixed reference for tests; a real run
  * generates every hole, hole 1 included, so no two runs open the same way.
  */
+/** You tee off from a level box, as you do in real golf. */
 const TEE_ISLAND = {
   centre: { x: 0, z: 0 },
   radius: 9,
   surfaceY: 4,
-} as const
+  slope: FLAT,
+}
 
 export const HOLE_ONE: Hole = {
   id: 'ace-1',
-  par: 2,
+  par: 3,
   tee: { x: 0, y: 4, z: 0 },
   teeIsland: TEE_ISLAND,
   greenIsland: {
     centre: { x: 0, z: -80 },
     radius: 18,
     surfaceY: 4,
+    // The reference green is level on purpose: it is the fixed testbed the
+    // shot maths was tuned against. Holes you actually play are contoured.
+    slope: FLAT,
   },
   pin: { x: 3, z: -82 },
-  cupRadius: 0.55,
+  cupRadius: 0.32,
   wind: {
     speed: 3.2,
     direction: 0.6,
@@ -47,13 +57,36 @@ export const HOLE_ONE: Hole = {
 export function generateHole(seed: number, holeNumber: number): Hole {
   const rng = streamFor(seed, holeNumber)
 
+  // The run has to get harder or it never ends: par 3 gives you a shot at
+  // the green and two putts, which a steady player will make all day. So
+  // the greens shrink, the pins tighten, the holes stretch and the wind
+  // gets up as you go.
+  const difficulty = Math.min(holeNumber / 25, 1)
+
   const wind = windFor(rng, holeNumber)
-  const radius = range(rng, 13, 20)
+  const radius = range(
+    rng,
+    lerp(16, 9.5, difficulty),
+    lerp(20, 13, difficulty),
+  )
+  // Greens sit above or below the tee. An uphill green shortens the shot
+  // and puts a taller wall in front of it; a sunken one runs on.
+  const surfaceY = range(rng, 1.5, lerp(9, 11, difficulty))
   /** What share of a full-power shot this hole asks for. */
-  const demand = range(rng, 0.55, 0.95)
+  const demand = range(
+    rng,
+    lerp(0.55, 0.74, difficulty),
+    lerp(0.95, 0.99, difficulty),
+  )
   const lateral = range(rng, -9, 9)
+  const slope = slopeFor(rng, difficulty)
   const pinAngle = range(rng, 0, Math.PI * 2)
-  const pinDist = range(rng, 0, radius * 0.5)
+  // Tighter to the edge as the run goes on.
+  const pinDist = range(
+    rng,
+    0,
+    Math.max(0, Math.min(radius * lerp(0.45, 0.85, difficulty), radius - 2.5)),
+  )
 
   // Ask the simulation how far the ball can actually be hit into this
   // hole's wind, and place the green as a share of that. A fixed distance
@@ -63,29 +96,39 @@ export function generateHole(seed: number, holeNumber: number): Hole {
     {
       ...HOLE_ONE,
       wind,
-      greenIsland: { ...HOLE_ONE.greenIsland, radius },
+      greenIsland: { ...HOLE_ONE.greenIsland, radius, surfaceY },
     },
     'drive',
   )
 
-  // Always leave a real carry over water between the two islands.
-  const centreZ = -Math.max(reach * demand, radius + TEE_ISLAND.radius + 22)
+  // Always leave a real carry over water between the two islands, and set
+  // a tall green further back still: the ball has to be over the lip by
+  // the time it arrives, and a high wall close to the tee is unclearable.
+  const minCentre =
+    radius + TEE_ISLAND.radius + 22 + Math.max(0, surfaceY - TEE_ISLAND.surfaceY) * 3.5
+  const centreZ = -Math.max(reach * demand, minCentre)
 
   return {
     id: `ace-${holeNumber}`,
-    par: 2,
+    par: 3,
     tee: { x: 0, y: 4, z: 0 },
     teeIsland: TEE_ISLAND,
     greenIsland: {
       centre: { x: lateral, z: centreZ },
       radius,
-      surfaceY: 4,
+      surfaceY,
+      slope,
     },
     pin: {
       x: lateral + Math.cos(pinAngle) * pinDist,
-      z: centreZ + Math.sin(pinAngle) * pinDist,
+      // Tucked pins are fine at the back and down the sides, but not on
+      // the front lip: a ball pitched at the pin stops a few metres past
+      // where it lands, so a pin too near the front edge puts the pitch
+      // point out over the water, and following the game's own advice
+      // drowns you. A tailwind adds run-out, hence the generous margin.
+      z: centreZ + Math.min(Math.sin(pinAngle) * pinDist, Math.max(0, radius - 8)),
     },
-    cupRadius: 0.55,
+    cupRadius: 0.32,
     wind,
   }
 }
@@ -96,10 +139,62 @@ export function generateHole(seed: number, holeNumber: number): Hole {
  * raising only the ceiling would still deal plenty of dead calm at hole 20.
  */
 function windFor(rng: () => number, holeNumber: number): Hole['wind'] {
-  const ceiling = Math.min(1.5 + holeNumber * 0.55, 7.5)
-  const floor = Math.max(0, ceiling - 2.5)
+  const ceiling = Math.min(1.5 + holeNumber * 0.6, 9.5)
+  const floor = Math.max(0, ceiling - 2.2)
   return {
     speed: range(rng, floor, ceiling),
     direction: range(rng, 0, Math.PI * 2),
   }
+}
+
+function lerp(a: number, b: number, t: number): number {
+  return a + (b - a) * t
+}
+
+/**
+ * The contour of a green: a steady tilt with a rolling swell over it,
+ * both firming up as the run goes on. Kept well inside what friction can
+ * hold, so a ball that comes to rest stays put instead of trickling away
+ * on its own.
+ */
+function slopeFor(rng: () => number, difficulty: number): Slope {
+  // Nearly flat to begin with, and severe by the end of the ramp.
+  const tilt = lerp(0.015, 0.075, difficulty)
+  const swellFreq = range(rng, 0.17, 0.32)
+
+  const slope: Slope = {
+    // Side slope is where the break comes from, so it runs either way.
+    gradientX: range(rng, -tilt, tilt),
+    // Front-to-back is mostly tilted away from the tee. Tilting towards it
+    // raises the front lip, and the ball has to clear that lip on a shot
+    // whose power was worked out against level ground -- so a steep one
+    // turns the game's own advice into a splash.
+    gradientZ: range(rng, -tilt, tilt * 0.3),
+    swellAmp: range(rng, 0.04, lerp(0.12, 0.34, difficulty)),
+    swellFreq,
+    swellPhase: range(rng, 0, Math.PI * 2),
+  }
+
+  // The tilt and the swell can both be steep at once, so the pair is
+  // scaled to fit under the limit rather than each being bounded alone --
+  // which would either leave the cap unreachable or let the two of them
+  // together exceed it.
+  const steepest = steepestOf(slope)
+  if (steepest <= MAX_GREEN_GRADIENT) return slope
+
+  const scale = MAX_GREEN_GRADIENT / steepest
+  return {
+    ...slope,
+    gradientX: slope.gradientX * scale,
+    gradientZ: slope.gradientZ * scale,
+    swellAmp: slope.swellAmp * scale,
+  }
+}
+
+/** The worst gradient this contour can produce anywhere on the green. */
+function steepestOf(slope: Slope): number {
+  return (
+    Math.hypot(slope.gradientX, slope.gradientZ) +
+    slope.swellAmp * slope.swellFreq
+  )
 }

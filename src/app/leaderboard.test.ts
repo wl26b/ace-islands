@@ -7,7 +7,7 @@ import { taps } from '../sim/testing'
 
 function logFor(seed: number, powers: number[]): RunLog {
   return {
-    version: 1,
+    version: 7,
     seed,
     shots: powers.map((p) => ({ hole: 1, aim: 0, ...taps(p, 0) })),
   }

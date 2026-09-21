@@ -70,6 +70,31 @@ body {
   backdrop-filter: blur(6px);
 }
 
+.elevation {
+  background: var(--panel);
+  border: 1px solid var(--panel-line);
+  border-radius: 999px;
+  padding: 7px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  backdrop-filter: blur(6px);
+  font-variant-numeric: tabular-nums;
+}
+
+.elevation.up {
+  color: #b4562f;
+}
+
+.elevation.down {
+  color: #2e7f6b;
+}
+
+.hole-label.practice {
+  color: #b4711f;
+}
+
 .wind {
   display: flex;
   align-items: center;
@@ -149,6 +174,29 @@ body {
   color: var(--bad);
 }
 
+/* The hole in one: bigger, gold, and it lingers. */
+.flash.ace {
+  color: #d99b1f;
+  font-size: clamp(30px, 10vw, 62px);
+  text-shadow:
+    0 0 24px rgba(244, 193, 90, 0.75),
+    0 3px 0 rgba(255, 255, 255, 0.8);
+}
+
+.flash.ace.show {
+  animation: ace 3s cubic-bezier(0.18, 0.9, 0.24, 1) forwards;
+}
+
+@keyframes ace {
+  0% { opacity: 0; transform: scale(0.4) rotate(-7deg); }
+  12% { opacity: 1; transform: scale(1.22) rotate(2deg); }
+  22% { transform: scale(0.98) rotate(-1deg); }
+  30% { transform: scale(1.06) rotate(0deg); }
+  40% { transform: scale(1) rotate(0deg); }
+  82% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1.1) translateY(-14px); }
+}
+
 @keyframes pop {
   0% { opacity: 0; transform: scale(0.8); }
   16% { opacity: 1; transform: scale(1.06); }
@@ -188,46 +236,117 @@ body {
   opacity: 0;
 }
 
-.bar {
+.prompt.pure {
+  color: var(--good);
+  font-weight: 800;
+}
+
+.prompt.near {
+  color: #a8721f;
+}
+
+.prompt.miss {
+  color: var(--bad);
+}
+
+/* --- the gauge: horizontal, at the foot of the screen ----------------- */
+
+.gauge {
   position: relative;
   width: min(560px, 88vw);
   height: 30px;
   border-radius: 10px;
   background: var(--panel);
   border: 1px solid var(--panel-line);
-  overflow: hidden;
   transition: opacity 0.18s ease;
   backdrop-filter: blur(6px);
 }
 
-.bar-fill {
-  position: absolute;
-  inset: 0 auto 0 0;
-  background: linear-gradient(90deg, #7fd0c4, #f2c14e);
-  transition: none;
-}
-
-.bar-fill.locked {
-  background: linear-gradient(90deg, #7fd0c4, #e2913f);
-}
-
-/* The impact zone, positioned from the simulation's own constants. */
-.bar-zone {
+.gauge-accuracy {
   position: absolute;
   top: 0;
   bottom: 0;
-  background: rgba(18, 50, 63, 0.14);
+  left: 0;
+  background: rgba(18, 50, 63, 0.08);
+  border-right: 2px solid rgba(18, 50, 63, 0.28);
+  border-radius: 9px 0 0 9px;
 }
 
-.bar-pure {
+.gauge-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: linear-gradient(90deg, #7fd0c4, #f2c14e);
+}
+
+.gauge-fill.locked {
+  background: linear-gradient(90deg, #7fd0c4, #e2913f);
+}
+
+.gauge-zone {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: rgba(18, 50, 63, 0.16);
+  border-radius: 3px;
+}
+
+.gauge-pure {
   position: absolute;
   top: 0;
   bottom: 0;
   background: var(--good);
-  opacity: 0.85;
+  opacity: 0.9;
 }
 
-.bar-needle {
+.gauge-ticks {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.gauge-tick {
+  position: absolute;
+  top: 7px;
+  bottom: 7px;
+  width: 1px;
+  margin-left: -0.5px;
+  background: rgba(18, 50, 63, 0.26);
+}
+
+.gauge-label {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(18, 50, 63, 0.38);
+  pointer-events: none;
+}
+
+.gauge-label-impact {
+  left: 0;
+  text-align: center;
+}
+
+.gauge-label-power {
+  padding-left: 8px;
+}
+
+/* On the green there is no impact test, so the bar shows pace alone. */
+.gauge.putting .gauge-zone,
+.gauge.putting .gauge-pure,
+.gauge.putting .gauge-label-impact {
+  display: none;
+}
+
+.gauge.putting .gauge-accuracy {
+  display: none;
+}
+
+.gauge-needle {
   position: absolute;
   top: -2px;
   bottom: -2px;
@@ -235,6 +354,119 @@ body {
   margin-left: -1.5px;
   background: var(--ink);
   border-radius: 2px;
+}
+
+.gauge-needle.struck {
+  width: 5px;
+  margin-left: -2.5px;
+  top: -5px;
+  bottom: -5px;
+  background: var(--bad);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.85);
+}
+
+.gauge-needle.struck.pure {
+  background: var(--good);
+}
+
+.gauge.struck {
+  box-shadow: 0 0 0 2px rgba(18, 50, 63, 0.1);
+}
+
+/* Off the tee: a single mark at the pin distance. */
+.pin-marker {
+  position: absolute;
+  top: -8px;
+  bottom: -8px;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--bad);
+  pointer-events: none;
+}
+
+.pin-marker::before {
+  content: '';
+  position: absolute;
+  bottom: 100%;
+  left: -4px;
+  border-top: 6px solid var(--bad);
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+}
+
+.pin-marker.unreachable {
+  background: rgba(18, 50, 63, 0.35);
+}
+
+.pin-marker.unreachable::before {
+  border-top-color: rgba(18, 50, 63, 0.35);
+}
+
+/* On the green: a band, because good pace is a range. */
+.pin-band {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  background: rgba(46, 158, 107, 0.34);
+  border-left: 2px solid var(--good);
+  border-right: 2px solid var(--good);
+  border-radius: 3px;
+  pointer-events: none;
+}
+
+.pin-band.unreachable {
+  background: rgba(18, 50, 63, 0.12);
+  border-left-color: rgba(18, 50, 63, 0.3);
+  border-right-color: rgba(18, 50, 63, 0.3);
+}
+
+.gauge-scale {
+  position: relative;
+  width: min(560px, 88vw);
+  height: 14px;
+}
+
+.scale-label {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.scale-pin {
+  color: var(--bad);
+}
+
+/* --- the carry and roll forecast --------------------------------------- */
+
+.forecast {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  min-height: 34px;
+  color: var(--ink);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+.forecast-parts {
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: #b4711f;
+}
+
+.forecast-total {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
 }
 
 .touch-controls {
@@ -383,7 +615,7 @@ body {
 
 .board-row {
   display: grid;
-  grid-template-columns: 26px 1fr 42px 42px;
+  grid-template-columns: 24px 1fr 46px 38px 38px;
   align-items: center;
   gap: 8px;
   padding: 9px 12px;
@@ -405,11 +637,29 @@ body {
 }
 
 .board-row .holes,
-.board-row .birdies {
+.board-row .birdies,
+.board-row .aces {
   text-align: right;
   font-weight: 700;
 }
 
 .board-row .birdies {
   color: var(--good);
+}
+
+.board-row .aces {
+  color: #c68a14;
+}
+
+.board-labels {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  border-top: none;
+}
+
+.board-labels span {
+  font-weight: 700;
+  color: var(--ink-soft) !important;
 }
