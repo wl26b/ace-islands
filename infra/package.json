@@ -1,0 +1,22 @@
+{
+  "name": "ace-islands-infra",
+  "private": true,
+  "version": "0.0.0",
+  "bin": { "infra": "bin/ace-islands.js" },
+  "scripts": {
+    "cdk": "cdk",
+    "deploy": "cdk deploy",
+    "diff": "cdk diff",
+    "synth": "cdk synth"
+  },
+  "devDependencies": {
+    "aws-cdk": "^2.1029.4",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.2",
+    "@types/node": "^24.5.2"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "^2.219.0",
+    "constructs": "^10.4.2"
+  }
+}
