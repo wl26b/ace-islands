@@ -458,7 +458,9 @@ export class Game {
 
     if (event.result.outcome === 'water') {
       this.stage.splash(event.result.end)
-      this.hud.flash('SPLASH', 'bad')
+      // Worth naming which way you died: short of the green and into the
+      // rock are the same penalty but completely different mistakes.
+      this.hud.flash(event.result.struckPeak ? 'INTO THE ROCK' : 'SPLASH', 'bad')
     } else if (event.result.outcome === 'holed') {
       const outcome = event.outcome
       if (outcome?.ace) {

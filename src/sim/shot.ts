@@ -44,6 +44,8 @@ export interface ShotResult {
   apex: number
   /** Distance flown before the first ground contact, in metres. */
   carry: number
+  /** True when the ball was stopped by the rock rather than the water. */
+  struckPeak: boolean
 }
 
 interface Surface {
@@ -193,6 +195,7 @@ export function simulateShot(hole: Hole, input: ShotInput): ShotResult {
   let carry = 0
   let landed = false
   let lipped = false
+  let struckPeak = false
   let outcome: ShotOutcome = 'rest'
   let surface: SurfaceKind = input.kind === 'putt' ? 'green' : 'tee'
 
@@ -231,6 +234,26 @@ export function simulateShot(hole: Hole, input: ShotInput): ShotResult {
       pos.y += vel.y * K.DT
       pos.z += vel.z * K.DT
       if (pos.y > apex) apex = pos.y
+
+      // The rock. Anything that arrives inside its footprint below the
+      // summit has hit it and falls into the sea; nothing ever lands on
+      // top, so there is no surface to resolve -- just a wall.
+      const peak = hole.peak
+      if (peak) {
+        const toPeak = horizontalDist(pos.x, pos.z, peak.centre.x, peak.centre.z)
+        if (toPeak <= peak.radius && pos.y <= peak.height) {
+          if (!landed) {
+            landed = true
+            carry = horizontalDist(pos.x, pos.z, input.from.x, input.from.z)
+          }
+          pos.y = 0
+          outcome = 'water'
+          surface = 'water'
+          struckPeak = true
+          path.push({ ...pos })
+          break
+        }
+      }
 
       const under = surfaceAt(hole, pos.x, pos.z)
 
@@ -381,5 +404,6 @@ export function simulateShot(hole: Hole, input: ShotInput): ShotResult {
     carry: input.kind === 'putt'
       ? horizontalDist(pos.x, pos.z, input.from.x, input.from.z)
       : carry,
+    struckPeak,
   }
 }

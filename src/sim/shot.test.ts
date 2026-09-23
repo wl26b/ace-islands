@@ -337,3 +337,61 @@ describe('the aim convention', () => {
     )
   })
 })
+
+describe('the rock', () => {
+  const peak = { centre: { x: 0, z: -45 }, radius: 7, height: 11 }
+  const rocky: Hole = { ...calm, peak }
+
+  test('a low shot is stopped by it', () => {
+    // 60% power is about 5.7m up at 40m out, well under an 11m summit.
+    const r = drive(rocky, 0.6)
+    expect(r.struckPeak).toBe(true)
+    expect(r.outcome).toBe('water')
+  })
+
+  test('a full shot flies over it', () => {
+    const r = drive(rocky, 1)
+    expect(r.struckPeak).toBe(false)
+  })
+
+  test('it narrows the power that gets home', () => {
+    // The whole reason it exists: without it the direct line is simply
+    // better than laying up, and there is no decision to make.
+    const band = (hole: Hole) => {
+      let count = 0
+      for (let p = 0.3; p <= 1; p += 0.005) {
+        if (drive(hole, p).surface === 'green') count++
+      }
+      return count
+    }
+    expect(band(rocky)).toBeLessThan(band(calm))
+  })
+
+  test('nothing ever lands on top of it', () => {
+    // It is a wall, not an island. A ball resting on the summit would be
+    // unplayable and would need rules of its own.
+    for (let p = 0.3; p <= 1; p += 0.002) {
+      const r = drive(rocky, p)
+      if (r.struckPeak) expect(r.outcome).toBe('water')
+      expect(r.end.y).toBeLessThan(peak.height)
+    }
+  })
+
+  test('a shot aimed around it is untouched', () => {
+    const wide = drive(rocky, 0.6, 0, 0.5)
+    expect(wide.struckPeak).toBe(false)
+  })
+
+  test('a hole with no rock never reports striking one', () => {
+    for (let p = 0.3; p <= 1; p += 0.01) {
+      expect(drive(calm, p).struckPeak).toBe(false)
+    }
+  })
+
+  test('striking it is still perfectly deterministic', () => {
+    const a = drive(rocky, 0.6)
+    const b = drive(rocky, 0.6)
+    expect(b.end).toEqual(a.end)
+    expect(b.path).toEqual(a.path)
+  })
+})

@@ -36,6 +36,21 @@ export interface Slope {
   swellPhase: number
 }
 
+/**
+ * A rock standing out of the water between the tee and the green.
+ *
+ * Not a surface -- nothing lands on it. A ball that reaches its footprint
+ * below the summit has struck it and drops into the sea. Its job is to
+ * narrow the band of power that gets you home: too little and you are
+ * into the rock, too much and you are through the back of the green.
+ */
+export interface Peak {
+  centre: Vec2
+  radius: number
+  /** Height of the summit above the water. */
+  height: number
+}
+
 /** A floating disc of land. */
 export interface Island {
   centre: Vec2
@@ -75,4 +90,6 @@ export interface Hole {
   pin: Vec2
   cupRadius: number
   wind: Wind
+  /** An obstacle on the direct line, on holes that have one. */
+  peak?: Peak
 }

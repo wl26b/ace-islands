@@ -1,8 +1,11 @@
-import type { Hole, Slope } from './types'
+import type { Hole, Peak, Slope } from './types'
 import { FLAT } from './types'
 import { MAX_GREEN_GRADIENT } from './constants'
 import { range, streamFor } from './rng'
-import { maxRange } from './range'
+import { simulateShot } from './shot'
+import { aimDirection, aimTowards } from './aim'
+import { pureTaps } from './bar'
+import { maxRange, powerForDistance } from './range'
 
 /**
  * The reference hole, and the generator that makes the ones you play.
@@ -108,7 +111,7 @@ export function generateHole(seed: number, holeNumber: number): Hole {
     radius + TEE_ISLAND.radius + 22 + Math.max(0, surfaceY - TEE_ISLAND.surfaceY) * 3.5
   const centreZ = -Math.max(reach * demand, minCentre)
 
-  return {
+  const bare: Hole = {
     id: `ace-${holeNumber}`,
     par: 3,
     tee: { x: 0, y: 4, z: 0 },
@@ -131,6 +134,116 @@ export function generateHole(seed: number, holeNumber: number): Hole {
     cupRadius: 0.32,
     wind,
   }
+
+  const peak = peakFor(rng, bare, difficulty)
+  return peak === null ? bare : { ...bare, peak }
+}
+
+/**
+ * A rock on the line to the green, or nothing.
+ *
+ * Its height is taken from the trajectory of the shot the hole actually
+ * asks for: high enough that a weak one is into the rock, low enough that
+ * the right one clears. Picking a height out of the air would either make
+ * the hole impossible or leave the rock as scenery, and which of the two
+ * would depend on how far the hole happened to be.
+ *
+ * The point of it is to narrow the band of power that gets you home. Under
+ * it and you are in the sea; over it and you may be through the back of
+ * the green. Without that squeeze the direct line is simply better than
+ * laying up, and there is no decision to make.
+ */
+function peakFor(rng: () => number, hole: Hole, difficulty: number): Peak | null {
+  // Rare early on, common late.
+  if (rng() > lerp(0.1, 0.8, difficulty)) return null
+
+  const toPin = Math.hypot(hole.pin.x - hole.tee.x, hole.pin.z - hole.tee.z)
+  const radius = range(rng, 5, 8)
+
+  // Somewhere down the carry. Measured to the green's centre, not to the
+  // pin: a pin tucked at the back sits beyond the middle of the green, so
+  // working back from it would put the rock inside the island.
+  const toGreen = Math.hypot(
+    hole.greenIsland.centre.x - hole.tee.x,
+    hole.greenIsland.centre.z - hole.tee.z,
+  )
+  const nearest = hole.teeIsland.radius + radius + CLEARANCE
+  const furthest = toGreen - hole.greenIsland.radius - radius - CLEARANCE
+  if (furthest <= nearest) return null
+  // Biased towards the green rather than the middle of the carry. Near
+  // the apex every shot is high and the rock is scenery; near the green
+  // the ball is coming down and a few points of power is the difference
+  // between clearing it and not.
+  const along = nearest + (furthest - nearest) * range(rng, 0.45, 0.95)
+
+  const aim = aimTowards(hole.pin.x - hole.tee.x, hole.pin.z - hole.tee.z)
+  const heading = aimDirection(aim)
+  const centre = {
+    x: hole.tee.x + heading.x * along,
+    z: hole.tee.z + heading.z * along,
+  }
+
+  // The line runs to the pin, which is not the green's centre, so the
+  // distance along it does not settle where the rock actually lands.
+  // Measure the finished position against both islands and give up rather
+  // than have a rock growing out of a green.
+  const clearOfTee = Math.hypot(centre.x - hole.teeIsland.centre.x, centre.z - hole.teeIsland.centre.z)
+  const clearOfGreen = Math.hypot(
+    centre.x - hole.greenIsland.centre.x,
+    centre.z - hole.greenIsland.centre.z,
+  )
+  if (clearOfTee < hole.teeIsland.radius + radius + CLEARANCE) return null
+  if (clearOfGreen < hole.greenIsland.radius + radius + CLEARANCE) return null
+
+  // How high the ball is over that spot when played as the hole intends.
+  const intended = simulateShot(hole, {
+    kind: 'drive',
+    from: hole.tee,
+    aim,
+    ...pureTaps(powerForDistance(hole, 'drive', toPin)),
+  })
+  const overhead = heightAlong(intended.path, hole.tee, along) - hole.tee.y
+  if (overhead < 5) return null
+
+  // Leaves the right shot room to spare early on, and less later.
+  const height = hole.tee.y + overhead * lerp(0.55, 0.78, difficulty)
+  const peak: Peak = { centre, radius, height }
+
+  // Then check rather than trust. The height was worked out from a shot
+  // aimed straight at the pin, but a crosswind has to be aimed off, and
+  // that shot flies a different line over the rock. A hole whose own
+  // recommended shot cannot clear its own obstacle is a hole that lies to
+  // the player, so it loses the rock instead.
+  const withPeak: Hole = { ...hole, peak }
+  for (const nudge of [0, -0.2, -0.1, 0.1, 0.2]) {
+    const played = simulateShot(withPeak, {
+      kind: 'drive',
+      from: hole.tee,
+      aim: aim + nudge,
+      ...pureTaps(powerForDistance(hole, 'drive', toPin)),
+    })
+    if (played.struckPeak) return null
+  }
+
+  return peak
+}
+
+/** Height of a flight as it passes a given distance from the tee. */
+function heightAlong(
+  path: readonly { x: number; y: number; z: number }[],
+  from: { x: number; z: number },
+  distance: number,
+): number {
+  let best = -Infinity
+  let closest = Infinity
+  for (const point of path) {
+    const gap = Math.abs(Math.hypot(point.x - from.x, point.z - from.z) - distance)
+    if (gap < closest) {
+      closest = gap
+      best = point.y
+    }
+  }
+  return best
 }
 
 /**
@@ -146,6 +259,9 @@ function windFor(rng: () => number, holeNumber: number): Hole['wind'] {
     direction: range(rng, 0, Math.PI * 2),
   }
 }
+
+/** Water left between the rock and either island. */
+const CLEARANCE = 6
 
 function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t

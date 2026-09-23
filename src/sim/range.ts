@@ -25,11 +25,21 @@ import type { ShotKind } from './shot'
  * and elevation, because those change how far the ball goes, but not the
  * green's contours -- what the slope does is for the grid to tell you.
  */
+/**
+ * The same hole with no rock in the way. Reach is a measure of how far the
+ * ball travels, not of whether this hole happens to have an obstacle on
+ * the line -- and the gauge is calibrated against it.
+ */
+function withoutPeak(hole: Hole): Hole {
+  const { peak: _peak, ...rest } = hole
+  return rest
+}
+
 function reference(hole: Hole, kind: ShotKind): { hole: Hole; from: Vec3 } {
   if (kind === 'putt') {
     return {
       hole: {
-        ...hole,
+        ...withoutPeak(hole),
         greenIsland: {
           centre: { x: 0, z: 0 },
           radius: 1e4,
@@ -49,7 +59,7 @@ function reference(hole: Hole, kind: ShotKind): { hole: Hole; from: Vec3 } {
   // the "flight" would come out as a very long roll.
   return {
     hole: {
-      ...hole,
+      ...withoutPeak(hole),
       teeIsland: { centre: { x: 0, z: 0 }, radius: 12, surfaceY: hole.tee.y, slope: FLAT },
       greenIsland: {
         // Near edge set back far enough that a full shot is always well

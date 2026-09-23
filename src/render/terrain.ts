@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import type { Hole, Island, Vec2 } from '../sim/types'
+import type { Hole, Island, Peak, Vec2 } from '../sim/types'
 import { gradientAt, heightAt } from '../sim/surface'
 import { PALETTE } from './palette'
 
@@ -593,4 +593,48 @@ export function buildGreenGrid(island: Island): GreenGrid {
       dashGeometry.getAttribute('position').needsUpdate = true
     },
   }
+}
+
+/** How far below the waterline the rock is rooted. */
+const PEAK_FOOT = -7
+
+/**
+ * The rock standing between the tee and the green.
+ *
+ * Nothing lands on it, so it needs no surface -- it is read as a wall, and
+ * it should look like one: a hard, dark spike rather than another island,
+ * or a player will try to land on it.
+ */
+export function buildPeak(peak: Peak): THREE.Group {
+  const group = new THREE.Group()
+  const tall = peak.height - PEAK_FOOT
+
+  const spire = new THREE.ConeGeometry(peak.radius, tall, 7, 3).toNonIndexed()
+  colourFaces(spire, (_cx, cy) => {
+    // cy is local to the cone, whose middle sits at zero.
+    const world = peak.height - tall / 2 + cy
+    if (world < 0.9) return PALETTE.sandDark
+    if (world < peak.height * 0.55) return PALETTE.rock
+    return PALETTE.rockDark
+  })
+  const mesh = new THREE.Mesh(spire, vertexLit())
+  mesh.position.y = peak.height - tall / 2
+  group.add(mesh)
+
+  // A few boulders at the foot, so it sits in the sea rather than on it.
+  for (let i = 0; i < 4; i++) {
+    const size = peak.radius * (0.16 + speckle(i, 61) * 0.16)
+    const boulder = new THREE.Mesh(
+      new THREE.IcosahedronGeometry(size, 0),
+      new THREE.MeshLambertMaterial({ color: PALETTE.rock, flatShading: true }),
+    )
+    const angle = speckle(i, 67) * Math.PI * 2
+    const out = peak.radius * (0.75 + speckle(i, 71) * 0.4)
+    boulder.position.set(Math.cos(angle) * out, 0.2 + speckle(i, 73) * 0.5, Math.sin(angle) * out)
+    boulder.scale.y = 0.7
+    group.add(boulder)
+  }
+
+  group.position.set(peak.centre.x, 0, peak.centre.z)
+  return group
 }

@@ -285,3 +285,56 @@ describe('the bar tells the truth about distance', () => {
     expect(powerForDistance(hole, 'drive', -5)).toBe(0)
   })
 })
+
+describe('generated rocks are fair', () => {
+  test('a hole never blocks its own recommended shot', () => {
+    // The height is derived from the intended trajectory, but that shot is
+    // aimed straight and a crosswind has to be aimed off -- so generation
+    // checks the nudged lines too and drops the rock if any is blocked.
+    for (let seed = 0; seed < 20; seed++) {
+      for (const n of [1, 6, 12, 20, 30, 40]) {
+        const hole = generateHole(seed * 7919 + 13, n)
+        if (!hole.peak) continue
+        const aim = aimTowards(hole.pin.x - hole.tee.x, hole.pin.z - hole.tee.z)
+        const toPin = Math.hypot(hole.pin.x - hole.tee.x, hole.pin.z - hole.tee.z)
+        const power = powerForDistance(hole, 'drive', toPin)
+        for (const nudge of [0, -0.2, -0.1, 0.1, 0.2]) {
+          const r = simulateShot(hole, {
+            kind: 'drive',
+            from: hole.tee,
+            aim: aim + nudge,
+            ...pureTaps(power),
+          })
+          expect(r.struckPeak, `seed ${seed} hole ${n} nudge ${nudge}`).toBe(false)
+        }
+      }
+    }
+  })
+
+  test('rocks stand clear of both islands', () => {
+    for (let seed = 0; seed < 30; seed++) {
+      for (const n of [1, 10, 20, 30, 40]) {
+        const hole = generateHole(seed * 7919 + 13, n)
+        const peak = hole.peak
+        if (!peak) continue
+        const fromTee = Math.hypot(peak.centre.x - hole.tee.x, peak.centre.z - hole.tee.z)
+        const fromGreen = Math.hypot(
+          peak.centre.x - hole.greenIsland.centre.x,
+          peak.centre.z - hole.greenIsland.centre.z,
+        )
+        expect(fromTee).toBeGreaterThan(hole.teeIsland.radius + peak.radius)
+        expect(fromGreen).toBeGreaterThan(hole.greenIsland.radius + peak.radius)
+      }
+    }
+  })
+
+  test('they are rare early and common late', () => {
+    const share = (hole: number) => {
+      let have = 0
+      for (let seed = 0; seed < 60; seed++) if (generateHole(seed * 7919 + 13, hole).peak) have++
+      return have / 60
+    }
+    expect(share(1)).toBeLessThan(0.35)
+    expect(share(30)).toBeGreaterThan(0.6)
+  })
+})

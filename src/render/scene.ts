@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import type { Hole } from '../sim/types'
 import { BALL_RADIUS, PALETTE } from './palette'
-import { buildIsland, buildSeascape, buildSky } from './terrain'
+import { buildIsland, buildPeak, buildSeascape, buildSky } from './terrain'
 import { heightAt } from '../sim/surface'
 import type { Seascape, Sky } from './terrain'
 
@@ -159,6 +159,8 @@ export function buildWorld(hole: Hole): World {
       Math.min(hole.greenIsland.radius * 0.45, 11),
     ),
   )
+
+  if (hole.peak) scene.add(buildPeak(hole.peak))
 
   const flag = buildFlag(hole)
   scene.add(flag)
